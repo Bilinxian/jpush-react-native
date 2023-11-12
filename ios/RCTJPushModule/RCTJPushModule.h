@@ -13,12 +13,17 @@
 #import "JPUSHService.h"
 #import "RCTJPushEventQueue.h"
 
+#import <AVFoundation/AVFoundation.h>
+
 #define J_APNS_NOTIFICATION_ARRIVED_EVENT  @"J_APNS_NOTIFICATION_ARRIVED_EVENT"
 #define J_APNS_NOTIFICATION_OPENED_EVENT   @"J_APNS_NOTIFICATION_OPENED_EVENT"
 #define J_LOCAL_NOTIFICATION_ARRIVED_EVENT @"J_LOCAL_NOTIFICATION_ARRIVED_EVENT"
 #define J_LOCAL_NOTIFICATION_OPENED_EVENT  @"J_LOCAL_NOTIFICATION_OPENED_EVENT"
 #define J_CUSTOM_NOTIFICATION_EVENT        @"J_CUSTOM_NOTIFICATION_EVENT"
 
-@interface RCTJPushModule : RCTEventEmitter <RCTBridgeModule>
+@interface RCTJPushModule : RCTEventEmitter <RCTBridgeModule,JPUSHRegisterDelegate,AVSpeechSynthesizerDelegate>
+
+@property (nonatomic,strong) AVSpeechSynthesizer* _Nonnull _avSpeaker;
+@property NSMutableArray<NSDictionary *> * _Nullable _notificationQueue;
 
 @end

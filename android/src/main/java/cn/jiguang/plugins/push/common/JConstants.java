@@ -8,6 +8,8 @@ public class JConstants {
 
     public static final String CODE = "code";
     public static final String CHANNEL = "channel";
+    public static final String CHANNELID = "channelId";
+    public static final String SOUND = "sound";
     public static final String SEQUENCE = "sequence";
     public static final String CONNECT_ENABLE = "connectEnable";
     //电话号码
@@ -24,6 +26,7 @@ public class JConstants {
     //消息
     public static final String MESSAGE_ID = "messageID";
     public static final String TITLE = "title";
+    public static final String BROADCAST_TIME = "broadcastTime";
     public static final String CONTENT = "content";
     public static final String EXTRAS = "extras";
     public static final String INAPPCLICKACTION = "inAppClickAction";

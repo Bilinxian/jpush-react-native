@@ -16,6 +16,7 @@
 #define EXTRAS     @"extras"
 #define BADGE      @"badge"
 #define RING       @"ring"
+#define BROADCASTTIME @"broadcastTime"
 
 //本地角标
 #define APP_BADGE @"appBadge"
@@ -78,49 +79,49 @@ RCT_EXPORT_MODULE(JPushModule);
 {
     self = [super init];
     NSNotificationCenter *defaultCenter = [NSNotificationCenter defaultCenter];
-    
+
     [defaultCenter removeObserver:self];
-    
+
     [defaultCenter addObserver:self
                       selector:@selector(sendApnsNotificationEvent:)
                           name:J_APNS_NOTIFICATION_ARRIVED_EVENT
                         object:nil];
-    
+
     [defaultCenter addObserver:self
                       selector:@selector(sendApnsNotificationEvent:)
                           name:J_APNS_NOTIFICATION_OPENED_EVENT
                         object:nil];
-    
+
     [defaultCenter addObserver:self
                       selector:@selector(sendLocalNotificationEvent:)
                           name:J_LOCAL_NOTIFICATION_ARRIVED_EVENT
                         object:nil];
-    
+
     [defaultCenter addObserver:self
                       selector:@selector(sendLocalNotificationEvent:)
                           name:J_LOCAL_NOTIFICATION_OPENED_EVENT
                         object:nil];
-    
+
     [defaultCenter addObserver:self
                       selector:@selector(sendCustomNotificationEvent:)
                           name:J_CUSTOM_NOTIFICATION_EVENT
                         object:nil];
-    
+
     [defaultCenter addObserver:self
                       selector:@selector(sendConnectEvent:)
                           name:kJPFNetworkDidCloseNotification
                         object:nil];
-    
+
     [defaultCenter addObserver:self
                       selector:@selector(sendConnectEvent:)
                           name:kJPFNetworkFailedRegisterNotification
                         object:nil];
-    
+
     [defaultCenter addObserver:self
                       selector:@selector(sendConnectEvent:)
                           name:kJPFNetworkDidLoginNotification
                         object:nil];
-    
+
     return self;
 }
 
@@ -134,6 +135,11 @@ RCT_EXPORT_METHOD(setDebugMode: (BOOL *)enable)
 
 RCT_EXPORT_METHOD(setupWithConfig:(NSDictionary *)params)
 {
+//初始化语音合成器
+  self._avSpeaker = [AVSpeechSynthesizer new];
+  self._avSpeaker.delegate = self;
+
+  self._notificationQueue = [NSMutableArray new];
     if (params[@"appKey"] && params[@"channel"] && params[@"production"]) {
            // JPush初始化配置
            NSMutableDictionary *launchOptions = [NSMutableDictionary dictionaryWithDictionary:self.bridge.launchOptions];
@@ -146,7 +152,7 @@ RCT_EXPORT_METHOD(setupWithConfig:(NSDictionary *)params)
                if (@available(iOS 12.0, *)) {
                  entity.types = JPAuthorizationOptionAlert|JPAuthorizationOptionBadge|JPAuthorizationOptionSound|JPAuthorizationOptionProvidesAppNotificationSettings;
                }
-               [JPUSHService registerForRemoteNotificationConfig:entity delegate:self.bridge.delegate];
+               [JPUSHService registerForRemoteNotificationConfig:entity delegate:self];
                [launchOptions objectForKey: UIApplicationLaunchOptionsRemoteNotificationKey];
                // 自定义消息
                NSNotificationCenter *defaultCenter = [NSNotificationCenter defaultCenter];
@@ -169,6 +175,194 @@ RCT_EXPORT_METHOD(setupWithConfig:(NSDictionary *)params)
 }
 
 
+//获取当前时间戳
+- (NSString*)currentTimeStr{
+  NSDate* date = [NSDate dateWithTimeIntervalSinceNow:0];//获取当前时间0秒后的时间
+//  NSTimeInterval time=[date timeIntervalSince1970]*1000;// *1000 是精确到毫秒，不乘就是精确到秒
+  NSString *timeString = [NSString stringWithFormat:@"%ld", (long)[date timeIntervalSince1970]*1000];
+//  NSInteger currentTime=[timeString integerValue];
+  return timeString;
+}
+
+//已经说完
+- (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance{
+
+  [SpeechSynthesizerModule emitEventWithName: @{@"success":@"1"}];
+    //如果朗读要循环朗读，可以在这里再次调用朗读方法
+    //[_avSpeaker speakUtterance:utterance];
+  NSUInteger length = [self._notificationQueue count];
+
+  if(length > 0){
+    NSDictionary *pushMessageInfo = [self._notificationQueue objectAtIndex:0];
+    [self._notificationQueue removeObjectAtIndex:0];
+    [self addPushMessage:pushMessageInfo];
+  }else{
+
+//    [self endBack];
+  }
+
+}
+
+- (void)boFangTextWithString:(NSString *)stra
+{
+    //初始化要说出的内容
+    AVSpeechUtterance *utterance = [[AVSpeechUtterance alloc] initWithString:stra];
+    //设置语速,语速介于AVSpeechUtteranceMaximumSpeechRate和AVSpeechUtteranceMinimumSpeechRate之间
+    //AVSpeechUtteranceMaximumSpeechRate
+    //AVSpeechUtteranceMinimumSpeechRate
+    //AVSpeechUtteranceDefaultSpeechRate
+    utterance.rate = 0.5;
+
+    //设置音高,[0.5 - 2] 默认 = 1
+    //AVSpeechUtteranceMaximumSpeechRate
+    //AVSpeechUtteranceMinimumSpeechRate
+    //AVSpeechUtteranceDefaultSpeechRate
+    utterance.pitchMultiplier =1 ;
+
+    //设置音量,[0-1] 默认 = 1
+    utterance.volume = 1;
+
+    //读一段前的停顿时间
+    utterance.preUtteranceDelay = 0;
+    //读完一段后的停顿时间
+    utterance.postUtteranceDelay = 0;
+
+    //设置声音,是AVSpeechSynthesisVoice对象
+    //AVSpeechSynthesisVoice定义了一系列的声音, 主要是不同的语言和地区.
+    //voiceWithLanguage: 根据制定的语言, 获得一个声音.
+    //speechVoices: 获得当前设备支持的声音
+    //currentLanguageCode: 获得当前声音的语言字符串, 比如”ZH-cn”
+    //language: 获得当前的语言
+    //通过特定的语言获得声音
+    AVSpeechSynthesisVoice *voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
+    //通过voicce标示获得声音
+    //AVSpeechSynthesisVoice *voice = [AVSpeechSynthesisVoice voiceWithIdentifier:AVSpeechSynthesisVoiceIdentifierAlex];
+    utterance.voice = voice;
+    //开始朗读
+  [__avSpeaker speakUtterance:utterance];
+
+}
+
+- (void)addPushMessage:(NSDictionary *)pushMessageInfo{
+  BOOL status=[VoiceSwitch getStatus];
+  if(!status)
+    return;
+  NSString *speakWord = pushMessageInfo[@"speak_word"];
+  NSString *receiveTimeStr = pushMessageInfo[@"receive_time"];
+  NSString *currentTimeStr = [self currentTimeStr];
+
+  NSInteger receiveTime=[receiveTimeStr integerValue];
+  NSInteger currentTime=[currentTimeStr integerValue];
+
+  if(currentTime - receiveTime > 60*1000)
+    return;
+//  if ([self.iFlySpeechSynthesizer isSpeaking]) {
+  if ([self._avSpeaker isSpeaking]) {
+    [self._notificationQueue addObject:pushMessageInfo];
+    return;
+  }
+  [self boFangTextWithString:speakWord];
+}
+
+-(void)activeAudio
+{
+  AVAudioSession *session = [AVAudioSession sharedInstance];
+  NSError *error;
+
+  [session setCategory:AVAudioSessionCategoryPlayback
+           withOptions:AVAudioSessionCategoryOptionMixWithOthers | AVAudioSessionCategoryOptionDuckOthers | AVAudioSessionCategoryOptionAllowAirPlay | AVAudioSessionCategoryOptionAllowBluetooth
+                 error:&error];
+  [session setActive:YES error:&error];
+}
+
+- (void)jpushNotificationAuthorization:(JPAuthorizationStatus)status withInfo:(nullable NSDictionary *)info {
+
+}
+
+//iOS 7 APNS
+- (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo fetchCompletionHandler:(void (^)(UIBackgroundFetchResult))completionHandler {
+
+  UIApplicationState state = [[UIApplication sharedApplication] applicationState];
+  if(state == UIApplicationStateBackground){
+    NSString *speakWord = userInfo[@"speak_word"];
+    if (speakWord != nil) {
+      [self activeAudio];
+      NSString *currentTimeStr = [self currentTimeStr];
+      NSDictionary *dict = @{@"speak_word":speakWord, @"receive_time":currentTimeStr};
+      [self addPushMessage:dict];
+    }
+    [[NSNotificationCenter defaultCenter] postNotificationName:J_APNS_NOTIFICATION_ARRIVED_EVENT object:userInfo];
+    [JPUSHService handleRemoteNotification:userInfo];
+  }
+
+  completionHandler(UIBackgroundFetchResultNewData);
+}
+
+//iOS 10 前台收到消息
+- (void)jpushNotificationCenter:(UNUserNotificationCenter *)center  willPresentNotification:(UNNotification *)notification withCompletionHandler:(void (^)(NSInteger))completionHandler {
+
+  NSDictionary * userInfo = notification.request.content.userInfo;
+
+  if([notification.request.trigger isKindOfClass:[UNPushNotificationTrigger class]]) {
+    // Apns
+    UIApplicationState state = [[UIApplication sharedApplication] applicationState];
+    if(state != UIApplicationStateBackground){
+
+      NSString *speakWord = userInfo[@"speak_word"];
+      if (speakWord != nil) {
+       NSString *currentTimeStr=[self currentTimeStr];
+       NSDictionary *dict = @{@"speak_word":speakWord, @"receive_time":currentTimeStr};
+       [self addPushMessage:dict];
+      }
+      [[NSNotificationCenter defaultCenter] postNotificationName:J_APNS_NOTIFICATION_ARRIVED_EVENT object:userInfo];
+      [JPUSHService handleRemoteNotification:userInfo];
+    }
+  }
+  else {
+    // 本地通知 todo
+
+    [[NSNotificationCenter defaultCenter] postNotificationName:J_LOCAL_NOTIFICATION_ARRIVED_EVENT object:userInfo];
+  }
+  //需要执行这个方法，选择是否提醒用户，有 Badge、Sound、Alert 三种类型可以选择设置
+  completionHandler(UNNotificationPresentationOptionAlert);
+}
+
+//iOS 10 消息事件回调
+- (void)jpushNotificationCenter:(UNUserNotificationCenter *)center didReceiveNotificationResponse:(UNNotificationResponse *)response withCompletionHandler:(void (^)(void))completionHandler {
+    NSDictionary *userInfo = response.notification.request.content.userInfo;
+
+    if ([response.notification.request.trigger isKindOfClass:[UNPushNotificationTrigger class]]) {
+      // Apns
+//      NSLog(@"iOS 10 APNS 消息事件回调");
+      [JPUSHService handleRemoteNotification:userInfo];
+      NSString *speakWord = userInfo[@"speak_word"];
+      if (speakWord != nil) {
+       NSString *currentTimeStr=[self currentTimeStr];
+       NSDictionary *dict = @{@"speak_word":speakWord, @"receive_time":currentTimeStr};
+       [self addPushMessage:dict];
+      }
+      // 保障应用被杀死状态下，用户点击推送消息，打开app后可以收到点击通知事件
+      [[RCTJPushEventQueue sharedInstance]._notificationQueue insertObject:userInfo atIndex:0];
+      [[NSNotificationCenter defaultCenter] postNotificationName:J_APNS_NOTIFICATION_OPENED_EVENT object:userInfo];
+
+    } else {
+//        NSLog(@"iOS 10 本地通知 消息事件回调");
+        // 保障应用被杀死状态下，用户点击推送消息，打开app后可以收到点击通知事件
+        [[RCTJPushEventQueue sharedInstance]._localNotificationQueue insertObject:userInfo atIndex:0];
+        [[NSNotificationCenter defaultCenter] postNotificationName:J_LOCAL_NOTIFICATION_OPENED_EVENT object:userInfo];
+
+    }
+    // 系统要求执行这个方法
+    completionHandler();
+}
+
+//自定义消息
+- (void)networkDidReceiveMessage:(NSNotification *)notification {
+    NSDictionary *userInfo = [notification userInfo];
+    [[NSNotificationCenter defaultCenter] postNotificationName:J_CUSTOM_NOTIFICATION_EVENT object:userInfo];
+}
+
+
 RCT_EXPORT_METHOD(loadJS)
 {
     NSMutableArray *notificationList = [RCTJPushEventQueue sharedInstance]._notificationQueue;
@@ -187,6 +381,16 @@ RCT_EXPORT_METHOD(getRegisterId:(RCTResponseSenderBlock) callback)
         NSMutableDictionary *response = [[NSMutableDictionary alloc] init];
         [response setValue:registrationID?registrationID:@"" forKey:REGISTER_ID];
         callback(@[response]);
+    }];
+}
+
+RCT_EXPORT_METHOD(isNotificationEnabled:(RCTResponseSenderBlock) callback) {
+    [JPUSHService requestNotificationAuthorization:^(JPAuthorizationStatus status) {
+        if (status <= JPAuthorizationStatusDenied) {
+            callback(@[@(NO)]);
+        }else {
+            callback(@[@(YES)]);
+        }
     }];
 }
 
@@ -347,7 +551,7 @@ RCT_EXPORT_METHOD(pageLeave:(NSString *)pageName)
                         method:@"emit"
                           args:@[INAPP_MESSAGE_EVENT,responseData ]
                     completion:NULL];
-    
+
 }
 
 - (void)jPushInAppMessageDidClick:(JPushInAppMessage *)inAppMessage {
@@ -412,14 +616,23 @@ RCT_EXPORT_METHOD(addNotification:(NSDictionary *)params)
     NSString *notificationContent = params[CONTENT]?params[CONTENT]:@"";
     content.title = notificationTitle;
     content.body = notificationContent;
+    if (@available(iOS 15.0, *)) {
+        content.interruptionLevel = 1;
+    } else {
+        // Fallback on earlier versions
+    }
     if(params[EXTRAS]){
         content.userInfo = @{MESSAGE_ID:messageID,TITLE:notificationTitle,CONTENT:notificationContent,EXTRAS:params[EXTRAS]};
     }else{
         content.userInfo = @{MESSAGE_ID:messageID,TITLE:notificationTitle,CONTENT:notificationContent};
     }
+    NSString *broadcastTime = params[BROADCASTTIME];
     JPushNotificationTrigger *trigger = [[JPushNotificationTrigger alloc] init];
     NSDateComponents *components = [[NSDateComponents alloc] init];
     NSDate *now = [NSDate date];
+    if (broadcastTime && [broadcastTime isKindOfClass:[NSString class]]) {
+        now = [NSDate dateWithTimeIntervalSince1970:[broadcastTime integerValue]/1000];
+    }
     NSCalendar *calendar = [NSCalendar currentCalendar];
     NSUInteger unitFlags = NSYearCalendarUnit | NSMonthCalendarUnit | NSDayCalendarUnit | NSHourCalendarUnit | NSMinuteCalendarUnit | NSSecondCalendarUnit;
     NSDateComponents *dateComponent = [calendar components:unitFlags fromDate:now];
@@ -586,7 +799,7 @@ RCT_EXPORT_METHOD(setGeofeneceMaxCount:(NSDictionary *)params)
     id alertData =  objectData[@"aps"][@"alert"];
     NSString *badge = objectData[@"aps"][@"badge"]?[objectData[@"aps"][@"badge"] stringValue]:@"";
     NSString *sound = objectData[@"aps"][@"sound"]?objectData[@"aps"][@"sound"]:@"";
-    
+
     NSString *title = @"";
     NSString *content = @"";
     if([alertData isKindOfClass:[NSString class]]){
@@ -608,7 +821,7 @@ RCT_EXPORT_METHOD(setGeofeneceMaxCount:(NSDictionary *)params)
         [copyData removeObjectForKey:@"aps"];
     }
     NSMutableDictionary * extrasData = [[NSMutableDictionary alloc] init];
-    
+
     NSArray * allkeys = [copyData allKeys];
     for (int i = 0; i < allkeys.count; i++)
     {
